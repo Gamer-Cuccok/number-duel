@@ -1,10 +1,10 @@
-const SUPABASE_URL = 'https://tlaeajmgycycihqdeqpo.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_yT1s8xGeAFrbMcYI772MgA_tLWUOK9M';
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 const CONFIG_READY =
   SUPABASE_URL.startsWith('https://') &&
-  !SUPABASE_URL.includes('https://tlaeajmgycycihqdeqpo.supabase.co') &&
-  !SUPABASE_ANON_KEY.includes('sb_publishable_yT1s8xGeAFrbMcYI772MgA_tLWUOK9M');
+  !SUPABASE_URL.includes('YOUR-PROJECT') &&
+  !SUPABASE_ANON_KEY.includes('YOUR_SUPABASE_ANON_KEY');
 
 const supabase = CONFIG_READY
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
