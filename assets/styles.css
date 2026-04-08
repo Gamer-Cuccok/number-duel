@@ -328,9 +328,26 @@ p {
 }
 
 .topbar {
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr auto;
   align-items: start;
   margin-bottom: 14px;
+}
+
+.room-summary-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-room-card {
+  gap: 14px;
+}
+
+.compact-range-list {
+  margin-top: 0;
+}
+
+.compact-pill {
+  padding: 12px 14px;
 }
 
 .back-btn {
@@ -351,11 +368,6 @@ p {
   font-weight: 900;
   letter-spacing: 0.16em;
   text-align: center;
-}
-
-.room-code-pill.compact {
-  font-size: clamp(24px, 8vw, 34px);
-  text-align: left;
 }
 
 .copy-btn {
@@ -559,8 +571,12 @@ p {
 }
 
 .guess-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr auto;
   align-items: end;
+}
+
+.action-card {
+  scroll-margin-top: 12px;
 }
 
 .history-list {
@@ -625,59 +641,6 @@ p {
 .loading-card {
   text-align: center;
   color: var(--muted);
-}
-
-
-.room-layout {
-  align-items: start;
-}
-
-.room-main-stack,
-.room-side-stack {
-  margin-top: 0;
-}
-
-.compact-room-card {
-  gap: 14px;
-}
-
-.compact-room-head {
-  display: grid;
-  gap: 14px;
-}
-
-.room-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.mini-stat {
-  padding: 12px;
-}
-
-.mini-stat .stat-value {
-  margin-top: 4px;
-  font-size: 18px;
-}
-
-.play-action-card {
-  position: relative;
-  overflow: hidden;
-}
-
-.play-action-card::before {
-  content: '';
-  position: absolute;
-  inset: auto auto -40px -30px;
-  width: 120px;
-  height: 120px;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(67,216,255,0.16), transparent 70%);
-}
-
-.room-code-card .inline-note {
-  margin-top: -4px;
 }
 
 .toast {
@@ -766,18 +729,6 @@ p {
   }
 }
 
-@media (min-width: 560px) {
-  .topbar {
-    grid-template-columns: 1fr auto;
-    align-items: center;
-  }
-
-  .compact-room-head {
-    grid-template-columns: 1fr auto;
-    align-items: end;
-  }
-}
-
 @media (min-width: 720px) {
   .app-shell {
     padding-top: 30px;
@@ -795,33 +746,51 @@ p {
   .guess-grid {
     grid-template-columns: 1fr 160px;
   }
+
+  .room-summary-grid {
+    grid-template-columns: 1.1fr 0.9fr;
+    align-items: center;
+  }
 }
 
-@media (max-width: 560px) {
-  .double-grid,
-  .finish-actions,
-  .room-actions,
-  .range-list,
-  .room-meta-grid {
+@media (max-width: 719px) {
+  .topbar,
+  .player-row,
+  .card-head,
+  .card-foot,
+  .range-row,
+  .history-top {
+    flex-wrap: wrap;
+  }
+
+  .topbar {
     grid-template-columns: 1fr;
   }
 
-  .card-head,
-  .player-row,
-  .card-foot,
-  .range-row,
-  .finish-row,
-  .history-top {
-    align-items: flex-start;
-    flex-direction: column;
+  .guess-grid,
+  .finish-actions,
+  .room-actions,
+  .range-list,
+  .compact-range-list {
+    grid-template-columns: 1fr;
   }
 
-  .room-code-card {
-    padding: 16px;
+  .room-code-pill {
+    font-size: clamp(24px, 8vw, 34px);
+    text-align: left;
+    letter-spacing: 0.12em;
   }
 
-  .room-code-pill.compact {
-    text-align: center;
+  .action-card {
+    position: sticky;
+    bottom: calc(10px + var(--safe-bottom));
+    z-index: 8;
+    background: linear-gradient(180deg, rgba(16, 24, 42, 0.96), rgba(12, 18, 33, 0.96));
+    backdrop-filter: blur(22px) saturate(130%);
+  }
+
+  .banner-title {
+    font-size: 20px;
   }
 }
 

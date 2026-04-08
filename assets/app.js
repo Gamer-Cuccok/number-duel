@@ -1,5 +1,5 @@
-const SUPABASE_URL = 'https://tlaeajmgycycihqdeqpo.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_yT1s8xGeAFrbMcYI772MgA_tLWUOK9M';
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 const CONFIG_READY =
   SUPABASE_URL.startsWith('https://') &&
@@ -28,7 +28,6 @@ const state = {
   silentSync: false,
   poller: null,
   pollInFlight: false,
-  lastRenderedSignature: '',
 };
 
 const statusLabels = {
@@ -54,12 +53,6 @@ async function init() {
       clearRoomState();
     }
   }
-
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && state.roomData?.room?.code) {
-      fetchRoomState(state.roomData.room.code, { silent: true, allowMissing: true });
-    }
-  });
 
   render();
 }
@@ -113,21 +106,34 @@ function renderLoading(text) {
   `;
 }
 
-function render() {
+function render(force = false) {
+  let nextSignature = 'landing';
+
   if (!CONFIG_READY) {
-    state.lastRenderedSignature = 'setup';
+    nextSignature = 'setup';
+  } else if (state.loading && !state.silentSync && !state.roomData) {
+    nextSignature = 'loading';
+  } else if (state.roomData) {
+    nextSignature = `room:${getRoomSignature(state.roomData)}`;
+  }
+
+  if (!force && nextSignature === state.lastRenderedSignature) {
+    return;
+  }
+
+  state.lastRenderedSignature = nextSignature;
+
+  if (!CONFIG_READY) {
     renderSetupView();
     return;
   }
 
-  if (state.loading && !state.silentSync) {
-    state.lastRenderedSignature = 'loading';
+  if (state.loading && !state.silentSync && !state.roomData) {
     renderLoading('Betöltés...');
     return;
   }
 
   if (!state.roomData) {
-    state.lastRenderedSignature = 'landing';
     stopPolling();
     renderLandingView();
     bindLandingEvents();
@@ -135,7 +141,6 @@ function render() {
   }
 
   startPolling();
-  state.lastRenderedSignature = getRoomSignature(state.roomData);
   renderRoomView();
   bindRoomEvents();
 }
@@ -265,7 +270,10 @@ function renderLandingView() {
 function renderRoomView() {
   const roomState = state.roomData;
   const room = roomState.room;
+  const you = roomState.you;
+  const players = roomState.players || [];
   const guesses = roomState.guesses || [];
+  const isHost = !!you?.is_host;
 
   const statusChipClass = room.status === 'finished'
     ? 'finished'
@@ -275,68 +283,51 @@ function renderRoomView() {
 
   app.innerHTML = `
     <div class="topbar fade-in">
-      <button id="back-to-home" class="btn btn-ghost back-btn">Kilépés a nézetből</button>
+      <button id="back-to-home" class="btn btn-ghost back-btn">Kilépés a szobából</button>
       <div class="status-chip ${statusChipClass}">${escapeHtml(statusLabels[room.status] || 'Játék')}</div>
     </div>
 
-    <div class="layout-stack room-layout fade-in">
-      <section class="section-stack room-main-stack">
+    <div class="layout-stack fade-in">
+      <section class="section-stack">
+        <div class="room-code-card compact-room-card">
+          <div class="room-summary-grid">
+            <div>
+              <div class="room-meta">Szobakód</div>
+              <div class="room-code-pill">${escapeHtml(room.code)}</div>
+            </div>
+            <div class="range-list compact-range-list">
+              <div class="stat-pill compact-pill">
+                <div class="stat-label">Minimum</div>
+                <div class="stat-value">${room.min_value}</div>
+              </div>
+              <div class="stat-pill compact-pill">
+                <div class="stat-label">Maximum</div>
+                <div class="stat-value">${room.max_value}</div>
+              </div>
+            </div>
+          </div>
+          <div class="room-actions">
+            <button id="copy-room-code" class="btn btn-secondary copy-btn">Kód másolása</button>
+            <button id="manual-refresh" class="btn btn-ghost copy-btn">Frissítés</button>
+          </div>
+        </div>
+
         ${renderStatusSection(roomState)}
-        ${renderRoomMetaCard(roomState)}
       </section>
 
-      <section class="section-stack room-side-stack">
-        ${renderPlayersPanel(roomState)}
-        ${renderHistorySection(guesses, roomState.you, room)}
+      <section class="section-stack">
+        <div class="section-card">
+          <div class="card-head">
+            <h2 class="section-title">Játékosok</h2>
+            ${isHost ? '<span class="role-chip">Host</span>' : '<span class="tag-chip">Vendég</span>'}
+          </div>
+          <div class="players-grid section-stack">
+            ${players.map((player) => renderPlayerCard(player, room, you)).join('')}
+          </div>
+        </div>
+
+        ${renderHistorySection(guesses, you, room)}
       </section>
-    </div>
-  `;
-}
-
-function renderRoomMetaCard(roomState) {
-  const room = roomState.room;
-  return `
-    <div class="room-code-card compact-room-card">
-      <div class="compact-room-head">
-        <div>
-          <div class="room-meta">Szobakód</div>
-          <div class="room-code-pill compact">${escapeHtml(room.code)}</div>
-        </div>
-        <div class="room-meta-grid">
-          <div class="stat-pill mini-stat">
-            <div class="stat-label">Min</div>
-            <div class="stat-value">${room.min_value}</div>
-          </div>
-          <div class="stat-pill mini-stat">
-            <div class="stat-label">Max</div>
-            <div class="stat-value">${room.max_value}</div>
-          </div>
-        </div>
-      </div>
-      <div class="room-actions">
-        <button id="copy-room-code" class="btn btn-secondary copy-btn">Kód másolása</button>
-        <button id="manual-refresh" class="btn btn-ghost copy-btn">Frissítés</button>
-      </div>
-      <p class="inline-note">A nézet már csak akkor rajzol újra, ha tényleg változott valami a szobában.</p>
-    </div>
-  `;
-}
-
-function renderPlayersPanel(roomState) {
-  const room = roomState.room;
-  const you = roomState.you;
-  const players = roomState.players || [];
-  const isHost = !!you?.is_host;
-
-  return `
-    <div class="section-card">
-      <div class="card-head">
-        <h2 class="section-title">Játékosok</h2>
-        ${isHost ? '<span class="role-chip">Host</span>' : '<span class="tag-chip">Vendég</span>'}
-      </div>
-      <div class="players-grid section-stack">
-        ${players.map((player) => renderPlayerCard(player, room, you)).join('')}
-      </div>
     </div>
   `;
 }
@@ -451,7 +442,7 @@ function renderStatusSection(roomState) {
           <div class="hint-text">${formatRangeHint(range.low, range.high)}</div>
         </div>
 
-        <div class="section-card play-action-card">
+        <div class="section-card action-card">
           <div class="card-head">
             <h2 class="section-title">Tippelés</h2>
             <span class="turn-chip ${yourTurn ? 'active' : ''}">${yourTurn ? 'Most te' : 'Várakozás'}</span>
@@ -644,10 +635,11 @@ function bindLandingEvents() {
 }
 
 function bindRoomEvents() {
-  document.getElementById('back-to-home')?.addEventListener('click', () => {
+  document.getElementById('back-to-home')?.addEventListener('click', async () => {
+    await leaveCurrentRoom();
     stopPolling();
     clearRoomState();
-    render();
+    render(true);
   });
 
   document.getElementById('copy-room-code')?.addEventListener('click', async () => {
@@ -868,7 +860,7 @@ async function withBusy(fn) {
   }
 
   state.busy = true;
-  state.loading = true;
+  state.loading = !state.roomData;
   render();
 
   try {
@@ -879,7 +871,7 @@ async function withBusy(fn) {
   } finally {
     state.busy = false;
     state.loading = false;
-    render();
+    render(true);
   }
 }
 
@@ -932,16 +924,10 @@ async function fetchRoomState(roomCode, options = {}) {
     }
     return false;
   } finally {
-    const nextSignature = state.roomData ? getRoomSignature(state.roomData) : 'landing';
-    const shouldRender = !silent || nextSignature !== state.lastRenderedSignature;
-
     state.loading = false;
     state.silentSync = false;
     state.pollInFlight = false;
-
-    if (shouldRender) {
-      render();
-    }
+    render(!silent);
   }
 }
 
@@ -972,10 +958,6 @@ function getVisibleRange(roomData) {
     low: Number.isInteger(you.range_low) ? you.range_low : room.min_value,
     high: Number.isInteger(you.range_high) ? you.range_high : room.max_value,
   };
-}
-
-function getRoomSignature(roomData) {
-  return JSON.stringify(roomData || null);
 }
 
 function getRangeBarStyle(low, high, min, max) {
@@ -1024,8 +1006,65 @@ function normalizeError(error) {
   if (/secret number/i.test(message)) return 'A titkos szám hibás vagy hiányzik.';
   if (/guess out of visible range/i.test(message)) return 'Ez a tipp már kívül esik a látható tartományodon.';
   if (/room not found/i.test(message)) return 'A szoba nem található.';
+  if (/private_player_states_session_id_key/i.test(message) || /duplicate key value/i.test(message)) return 'Ez a böngésző már bent ragadt egy másik szobában. Futtasd le a javító SQL-t, vagy lépj ki a régi szobából.';
 
   return message;
+}
+
+async function leaveCurrentRoom() {
+  if (!CONFIG_READY || !state.roomData?.room?.code) {
+    return;
+  }
+
+  try {
+    await supabase.rpc('leave_current_room', {
+      _session_id: state.sessionId,
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function getRoomSignature(roomData) {
+  return JSON.stringify({
+    room: {
+      code: roomData.room?.code,
+      status: roomData.room?.status,
+      min_value: roomData.room?.min_value,
+      max_value: roomData.room?.max_value,
+      current_turn_slot: roomData.room?.current_turn_slot,
+      winner_slot: roomData.room?.winner_slot,
+    },
+    you: {
+      slot: roomData.you?.slot,
+      is_host: roomData.you?.is_host,
+      has_submitted_secret: roomData.you?.has_submitted_secret,
+      range_low: roomData.you?.range_low,
+      range_high: roomData.you?.range_high,
+      secret_number: roomData.you?.secret_number,
+      revealed_secret_number: roomData.you?.revealed_secret_number,
+    },
+    opponent: {
+      slot: roomData.opponent?.slot,
+      has_submitted_secret: roomData.opponent?.has_submitted_secret,
+      revealed_secret_number: roomData.opponent?.revealed_secret_number,
+    },
+    players: (roomData.players || []).map((player) => ({
+      slot: player.slot,
+      nickname: player.nickname,
+      is_host: player.is_host,
+      is_you: player.is_you,
+      has_submitted_secret: player.has_submitted_secret,
+    })),
+    guesses: (roomData.guesses || []).map((guess) => ({
+      turn_no: guess.turn_no,
+      guesser_slot: guess.guesser_slot,
+      guess_value: guess.guess_value,
+      result: guess.result,
+      visible_low: guess.visible_low,
+      visible_high: guess.visible_high,
+    })),
+  });
 }
 
 function escapeHtml(value) {

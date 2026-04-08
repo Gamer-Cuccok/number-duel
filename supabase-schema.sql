@@ -94,6 +94,91 @@ begin
 end;
 $$;
 
+create or replace function public.leave_current_room(
+  _session_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_session text;
+  v_player_id uuid;
+  v_room_id uuid;
+  v_remaining integer;
+begin
+  v_session := trim(coalesce(_session_id, ''));
+
+  if v_session = '' then
+    return jsonb_build_object('left', false);
+  end if;
+
+  select ps.player_id, ps.room_id
+  into v_player_id, v_room_id
+  from public.private_player_states ps
+  where ps.session_id = v_session
+  limit 1;
+
+  if v_player_id is null then
+    return jsonb_build_object('left', false);
+  end if;
+
+  delete from public.room_players
+  where id = v_player_id;
+
+  select count(*)
+  into v_remaining
+  from public.room_players
+  where room_id = v_room_id;
+
+  if v_remaining = 0 then
+    delete from public.game_rooms
+    where id = v_room_id;
+
+    return jsonb_build_object('left', true, 'room_deleted', true);
+  end if;
+
+  if not exists (
+    select 1
+    from public.room_players
+    where room_id = v_room_id
+      and is_host = true
+  ) then
+    update public.room_players
+    set is_host = true
+    where id = (
+      select rp.id
+      from public.room_players rp
+      where rp.room_id = v_room_id
+      order by rp.slot
+      limit 1
+    );
+  end if;
+
+  update public.game_rooms
+  set status = 'lobby',
+      current_turn_slot = null,
+      winner_slot = null
+  where id = v_room_id;
+
+  update public.room_players
+  set has_submitted_secret = false
+  where room_id = v_room_id;
+
+  update public.private_player_states
+  set secret_number = null,
+      range_low = null,
+      range_high = null
+  where room_id = v_room_id;
+
+  delete from public.game_guesses
+  where room_id = v_room_id;
+
+  return jsonb_build_object('left', true, 'room_deleted', false);
+end;
+$$;
+
 create or replace function public.create_room(
   _session_id text,
   _nickname text,
@@ -124,6 +209,8 @@ begin
   if _min_value is null or _max_value is null or _min_value >= _max_value then
     raise exception 'invalid range';
   end if;
+
+  perform public.leave_current_room(trim(_session_id));
 
   v_code := public.generate_room_code();
 
@@ -189,6 +276,8 @@ begin
   if v_existing_player is not null then
     return jsonb_build_object('code', v_room.code, 'joined', true, 'rejoined', true);
   end if;
+
+  perform public.leave_current_room(trim(_session_id));
 
   if v_room.status <> 'lobby' then
     raise exception 'already in progress';
