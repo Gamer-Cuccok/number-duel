@@ -328,7 +328,7 @@ p {
 }
 
 .topbar {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr;
   align-items: start;
   margin-bottom: 14px;
 }
@@ -351,6 +351,11 @@ p {
   font-weight: 900;
   letter-spacing: 0.16em;
   text-align: center;
+}
+
+.room-code-pill.compact {
+  font-size: clamp(24px, 8vw, 34px);
+  text-align: left;
 }
 
 .copy-btn {
@@ -554,7 +559,7 @@ p {
 }
 
 .guess-grid {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr;
   align-items: end;
 }
 
@@ -620,6 +625,59 @@ p {
 .loading-card {
   text-align: center;
   color: var(--muted);
+}
+
+
+.room-layout {
+  align-items: start;
+}
+
+.room-main-stack,
+.room-side-stack {
+  margin-top: 0;
+}
+
+.compact-room-card {
+  gap: 14px;
+}
+
+.compact-room-head {
+  display: grid;
+  gap: 14px;
+}
+
+.room-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mini-stat {
+  padding: 12px;
+}
+
+.mini-stat .stat-value {
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.play-action-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.play-action-card::before {
+  content: '';
+  position: absolute;
+  inset: auto auto -40px -30px;
+  width: 120px;
+  height: 120px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(67,216,255,0.16), transparent 70%);
+}
+
+.room-code-card .inline-note {
+  margin-top: -4px;
 }
 
 .toast {
@@ -708,6 +766,18 @@ p {
   }
 }
 
+@media (min-width: 560px) {
+  .topbar {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  .compact-room-head {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
+}
+
 @media (min-width: 720px) {
   .app-shell {
     padding-top: 30px;
@@ -724,6 +794,34 @@ p {
 
   .guess-grid {
     grid-template-columns: 1fr 160px;
+  }
+}
+
+@media (max-width: 560px) {
+  .double-grid,
+  .finish-actions,
+  .room-actions,
+  .range-list,
+  .room-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card-head,
+  .player-row,
+  .card-foot,
+  .range-row,
+  .finish-row,
+  .history-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .room-code-card {
+    padding: 16px;
+  }
+
+  .room-code-pill.compact {
+    text-align: center;
   }
 }
 

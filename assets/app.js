@@ -28,6 +28,7 @@ const state = {
   silentSync: false,
   poller: null,
   pollInFlight: false,
+  lastRenderedSignature: '',
 };
 
 const statusLabels = {
@@ -53,6 +54,12 @@ async function init() {
       clearRoomState();
     }
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.roomData?.room?.code) {
+      fetchRoomState(state.roomData.room.code, { silent: true, allowMissing: true });
+    }
+  });
 
   render();
 }
@@ -108,16 +115,19 @@ function renderLoading(text) {
 
 function render() {
   if (!CONFIG_READY) {
+    state.lastRenderedSignature = 'setup';
     renderSetupView();
     return;
   }
 
   if (state.loading && !state.silentSync) {
+    state.lastRenderedSignature = 'loading';
     renderLoading('Betöltés...');
     return;
   }
 
   if (!state.roomData) {
+    state.lastRenderedSignature = 'landing';
     stopPolling();
     renderLandingView();
     bindLandingEvents();
@@ -125,6 +135,7 @@ function render() {
   }
 
   startPolling();
+  state.lastRenderedSignature = getRoomSignature(state.roomData);
   renderRoomView();
   bindRoomEvents();
 }
@@ -254,10 +265,7 @@ function renderLandingView() {
 function renderRoomView() {
   const roomState = state.roomData;
   const room = roomState.room;
-  const you = roomState.you;
-  const players = roomState.players || [];
   const guesses = roomState.guesses || [];
-  const isHost = !!you?.is_host;
 
   const statusChipClass = room.status === 'finished'
     ? 'finished'
@@ -271,33 +279,64 @@ function renderRoomView() {
       <div class="status-chip ${statusChipClass}">${escapeHtml(statusLabels[room.status] || 'Játék')}</div>
     </div>
 
-    <div class="layout-stack fade-in">
-      <section>
-        <div class="room-code-card">
-          <div class="room-meta">Szobakód</div>
-          <div class="room-code-pill">${escapeHtml(room.code)}</div>
-          <div class="room-actions">
-            <button id="copy-room-code" class="btn btn-secondary copy-btn">Kód másolása</button>
-            <button id="manual-refresh" class="btn btn-ghost copy-btn">Frissítés</button>
-          </div>
-        </div>
-
+    <div class="layout-stack room-layout fade-in">
+      <section class="section-stack room-main-stack">
         ${renderStatusSection(roomState)}
+        ${renderRoomMetaCard(roomState)}
       </section>
 
-      <section class="section-stack">
-        <div class="section-card">
-          <div class="card-head">
-            <h2 class="section-title">Játékosok</h2>
-            ${isHost ? '<span class="role-chip">Host</span>' : '<span class="tag-chip">Vendég</span>'}
+      <section class="section-stack room-side-stack">
+        ${renderPlayersPanel(roomState)}
+        ${renderHistorySection(guesses, roomState.you, room)}
+      </section>
+    </div>
+  `;
+}
+
+function renderRoomMetaCard(roomState) {
+  const room = roomState.room;
+  return `
+    <div class="room-code-card compact-room-card">
+      <div class="compact-room-head">
+        <div>
+          <div class="room-meta">Szobakód</div>
+          <div class="room-code-pill compact">${escapeHtml(room.code)}</div>
+        </div>
+        <div class="room-meta-grid">
+          <div class="stat-pill mini-stat">
+            <div class="stat-label">Min</div>
+            <div class="stat-value">${room.min_value}</div>
           </div>
-          <div class="players-grid section-stack">
-            ${players.map((player) => renderPlayerCard(player, room, you)).join('')}
+          <div class="stat-pill mini-stat">
+            <div class="stat-label">Max</div>
+            <div class="stat-value">${room.max_value}</div>
           </div>
         </div>
+      </div>
+      <div class="room-actions">
+        <button id="copy-room-code" class="btn btn-secondary copy-btn">Kód másolása</button>
+        <button id="manual-refresh" class="btn btn-ghost copy-btn">Frissítés</button>
+      </div>
+      <p class="inline-note">A nézet már csak akkor rajzol újra, ha tényleg változott valami a szobában.</p>
+    </div>
+  `;
+}
 
-        ${renderHistorySection(guesses, you, room)}
-      </section>
+function renderPlayersPanel(roomState) {
+  const room = roomState.room;
+  const you = roomState.you;
+  const players = roomState.players || [];
+  const isHost = !!you?.is_host;
+
+  return `
+    <div class="section-card">
+      <div class="card-head">
+        <h2 class="section-title">Játékosok</h2>
+        ${isHost ? '<span class="role-chip">Host</span>' : '<span class="tag-chip">Vendég</span>'}
+      </div>
+      <div class="players-grid section-stack">
+        ${players.map((player) => renderPlayerCard(player, room, you)).join('')}
+      </div>
     </div>
   `;
 }
@@ -412,7 +451,7 @@ function renderStatusSection(roomState) {
           <div class="hint-text">${formatRangeHint(range.low, range.high)}</div>
         </div>
 
-        <div class="section-card">
+        <div class="section-card play-action-card">
           <div class="card-head">
             <h2 class="section-title">Tippelés</h2>
             <span class="turn-chip ${yourTurn ? 'active' : ''}">${yourTurn ? 'Most te' : 'Várakozás'}</span>
@@ -893,21 +932,30 @@ async function fetchRoomState(roomCode, options = {}) {
     }
     return false;
   } finally {
+    const nextSignature = state.roomData ? getRoomSignature(state.roomData) : 'landing';
+    const shouldRender = !silent || nextSignature !== state.lastRenderedSignature;
+
     state.loading = false;
     state.silentSync = false;
     state.pollInFlight = false;
-    render();
+
+    if (shouldRender) {
+      render();
+    }
   }
 }
 
 function startPolling() {
-  stopPolling();
+  if (state.poller) {
+    return;
+  }
+
   state.poller = setInterval(async () => {
     if (!state.roomData?.room?.code || document.hidden) {
       return;
     }
     await fetchRoomState(state.roomData.room.code, { silent: true, allowMissing: true });
-  }, 1200);
+  }, 1800);
 }
 
 function stopPolling() {
@@ -924,6 +972,10 @@ function getVisibleRange(roomData) {
     low: Number.isInteger(you.range_low) ? you.range_low : room.min_value,
     high: Number.isInteger(you.range_high) ? you.range_high : room.max_value,
   };
+}
+
+function getRoomSignature(roomData) {
+  return JSON.stringify(roomData || null);
 }
 
 function getRangeBarStyle(low, high, min, max) {
