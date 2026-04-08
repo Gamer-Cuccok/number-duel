@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://tlaeajmgycycihqdeqpo.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_yT1s8xGeAFrbMcYI772MgA_tLWUOK9M';
 
-const BUILD_VERSION = 'v5-verified-2026-04-08';
+const BUILD_VERSION = 'v6-uifix-2026-04-08';
 
 const CONFIG_READY =
   SUPABASE_URL.startsWith('https://') &&
@@ -214,13 +214,25 @@ function showToast(message, type = 'info') {
   }, 2400);
 }
 
-function showEventToast(message, type = 'info', duration = 2500) {
+function showEventToast(payload, type = 'info', duration = 2500) {
   if (!eventToastEl) {
-    showToast(message, type);
+    showToast(typeof payload === 'string' ? payload : payload?.title || 'Új esemény', type);
     return;
   }
 
-  eventToastEl.textContent = message;
+  if (typeof payload === 'string') {
+    eventToastEl.innerHTML = `<div class="event-toast-line">${escapeHtml(payload)}</div>`;
+  } else {
+    const title = escapeHtml(payload?.title || 'Új esemény');
+    const message = payload?.message ? `<div class="event-toast-subtitle">${escapeHtml(payload.message)}</div>` : '';
+    const range = payload?.range ? `<div class="event-toast-range">${escapeHtml(payload.range)}</div>` : '';
+    eventToastEl.innerHTML = `
+      <div class="event-toast-title">${title}</div>
+      ${message}
+      ${range}
+    `;
+  }
+
   eventToastEl.className = `event-toast show ${type}`;
   clearTimeout(showEventToast.timer);
   showEventToast.timer = setTimeout(() => {
@@ -588,6 +600,8 @@ function renderStatusSection(roomState) {
           </div>
         </div>
 
+        ${renderLatestGuessSpotlight(roomState)}
+
         <div class="double-grid room-play-grid room-play-grid-single">
           <div class="range-card">
             <div class="range-title">A te látható tartományod</div>
@@ -630,7 +644,7 @@ function renderStatusSection(roomState) {
             ? `
               <div class="guess-grid section-stack mobile-single-grid">
                 <div>
-                  <label class="label" for="guess-number">Tipped</label>
+                  <label class="label" for="guess-number">Tipp</label>
                   <input id="guess-number" class="input" type="number" min="${range.low}" max="${range.high}" placeholder="${range.low} - ${range.high}" />
                 </div>
                 <button id="submit-guess-btn" class="btn btn-primary">Tipp küldése</button>
@@ -778,6 +792,36 @@ function renderOwnSecretCard(roomState, options = {}) {
   `;
 }
 
+function renderLatestGuessSpotlight(roomState) {
+  const latestGuess = getLatestGuess(roomState);
+
+  if (!latestGuess || roomState.room?.status !== 'playing') {
+    return '';
+  }
+
+  const isYou = latestGuess.guesser_slot === roomState.you?.slot;
+  const resultText = latestGuess.result === 'correct'
+    ? 'Telitalálat'
+    : latestGuess.result === 'higher'
+      ? 'A keresett szám nagyobb'
+      : 'A keresett szám kisebb';
+  const ownerText = isYou ? 'A te mostani sávod' : `${latestGuess.guesser_nickname || 'Az ellenfél'} mostani sávja`;
+  const rangeText = formatRangeHeadline(latestGuess.visible_low, latestGuess.visible_high);
+
+  return `
+    <div class="section-card latest-guess-card">
+      <div class="card-head latest-guess-head">
+        <h2 class="section-title">Utolsó tipp</h2>
+        <span class="tag-chip">${escapeHtml(latestGuess.guesser_nickname || 'Valaki')} ${isYou ? '· Te' : ''}</span>
+      </div>
+      <div class="latest-guess-value">${latestGuess.guess_value}</div>
+      <div class="latest-guess-result ${latestGuess.result}">${resultText}</div>
+      <div class="latest-guess-range-label">${escapeHtml(ownerText)}</div>
+      <div class="latest-guess-range">${rangeText}</div>
+    </div>
+  `;
+}
+
 function renderPlayerCard(player, room, you) {
   const turnClass = room.current_turn_slot === player.slot && room.status === 'playing' ? 'current-turn' : '';
   const youClass = player.is_you ? 'you' : '';
@@ -880,8 +924,8 @@ function renderHistoryCard(guess, you) {
 
   const myGuess = guess.guesser_slot === you.slot;
   const rangeText = myGuess
-    ? `Saját tartomány utána: ${guess.visible_low} – ${guess.visible_high}`
-    : 'Ez az ellenfél sávja volt ennél a tippnél.';
+    ? `A te sávod ezután: ${formatRangeHeadline(guess.visible_low, guess.visible_high)}`
+    : `Az ő sávja ezután: ${formatRangeHeadline(guess.visible_low, guess.visible_high)}`;
 
   return `
     <div class="history-card">
@@ -1300,14 +1344,20 @@ function maybeAnnounceLatestGuess(previousRoomData, nextRoomData) {
     return;
   }
 
-  const actorName = nextLatest.guesser_slot === nextRoomData.you?.slot ? 'Te' : (nextLatest.guesser_nickname || 'Valaki');
+  const isYou = nextLatest.guesser_slot === nextRoomData.you?.slot;
+  const actorName = isYou ? 'Te' : (nextLatest.guesser_nickname || 'Valaki');
   const resultLabel = nextLatest.result === 'correct'
-    ? 'telitalálatot lőtt'
+    ? 'Telitalálat'
     : nextLatest.result === 'higher'
-      ? 'tippelt, és a szám nagyobb'
-      : 'tippelt, és a szám kisebb';
+      ? 'A keresett szám nagyobb'
+      : 'A keresett szám kisebb';
+  const rangeOwner = isYou ? 'A te sávod most' : `${actorName} sávja most`;
 
-  showEventToast(`${actorName}: ${nextLatest.guess_value} · ${resultLabel}`);
+  showEventToast({
+    title: `${actorName} tippje: ${nextLatest.guess_value}`,
+    message: resultLabel,
+    range: `${rangeOwner}: ${formatRangeHeadline(nextLatest.visible_low, nextLatest.visible_high)}`,
+  }, nextLatest.result === 'correct' ? 'success' : 'info', 2500);
   playSound(nextLatest.result === 'correct' ? 'correct' : 'guess');
 }
 
@@ -1317,7 +1367,7 @@ function maybeAnnounceYourTurn(previousRoomData, nextRoomData) {
   const wasYourTurn = previousRoomData.room?.status === 'playing' && previousRoomData.room?.current_turn_slot === youSlot;
 
   if (nowYourTurn && !wasYourTurn) {
-    showEventToast('Te jössz!', 'success', 1900);
+    showEventToast({ title: 'Te jössz!', message: 'Most már tippelhetsz.' }, 'success', 1700);
     playSound('turn');
     vibrate([90, 50, 120]);
   }
@@ -1331,7 +1381,7 @@ function maybeAnnounceRoundEnd(previousRoomData, nextRoomData) {
   const winnerName = getWinnerName(nextRoomData);
 
   if (nextRoomData.room.match_winner_slot) {
-    showEventToast(`${winnerName} megnyerte a meccset!`, 'success', 2800);
+    showEventToast({ title: `${winnerName} megnyerte a meccset!`, message: 'Lezárult a teljes best of.' }, 'success', 2800);
     playSound('victory');
     vibrate([160, 60, 160, 60, 220]);
   } else {

@@ -695,17 +695,125 @@ p {
 }
 
 .event-toast {
-  top: calc(16px + env(safe-area-inset-top));
-  transform: translateX(-50%) translateY(-16px) scale(0.98);
-  background: linear-gradient(180deg, rgba(17, 24, 43, 0.96), rgba(9, 13, 26, 0.96));
+  top: 50%;
+  transform: translateX(-50%) translateY(-50%) scale(0.96);
+  background: linear-gradient(180deg, rgba(17, 24, 43, 0.98), rgba(9, 13, 26, 0.98));
   border-color: rgba(67,216,255,0.18);
   font-weight: 700;
   letter-spacing: -0.01em;
+  padding: 18px 18px 16px;
+  min-width: min(88vw, 340px);
+  max-width: min(90vw, 420px);
+  z-index: 60;
 }
 
 .event-toast.show {
   opacity: 1;
-  transform: translateX(-50%) translateY(0) scale(1);
+  transform: translateX(-50%) translateY(-50%) scale(1);
+}
+
+
+.event-toast-title {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.event-toast-subtitle,
+.event-toast-line {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #eaf2ff;
+}
+
+.event-toast-range {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #bdf5ff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.latest-guess-card {
+  display: grid;
+  gap: 10px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(67,216,255,0.1), rgba(255,255,255,0.03));
+  border-color: rgba(67,216,255,0.18);
+}
+
+.latest-guess-head {
+  align-items: flex-start;
+}
+
+.latest-guess-value {
+  font-size: clamp(32px, 10vw, 52px);
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+}
+
+.latest-guess-result {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.latest-guess-result.higher {
+  color: #bdfce2;
+}
+
+.latest-guess-result.lower {
+  color: #ffd0d0;
+}
+
+.latest-guess-result.correct {
+  color: #fff1b4;
+}
+
+.latest-guess-range-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.latest-guess-range {
+  font-size: clamp(22px, 7vw, 34px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.section-title,
+.player-name,
+.banner-title,
+.result-title,
+.room-code-pill,
+.stat-value,
+.history-result,
+.event-toast-title,
+.event-toast-subtitle,
+.event-toast-line,
+.event-toast-range,
+.latest-guess-range,
+.latest-guess-range-label {
+  overflow-wrap: anywhere;
+}
+
+.topbar > *,
+.card-head > *,
+.player-row > *,
+.history-top > *,
+.score-top > * {
+  min-width: 0;
 }
 
 .loading-spinner {
@@ -822,10 +930,15 @@ p {
     letter-spacing: 0.12em;
   }
 
+  .action-card,
+  .sticky-turn-banner,
+  .sticky-action-card {
+    position: static;
+    bottom: auto;
+    top: auto;
+  }
+
   .action-card {
-    position: sticky;
-    bottom: calc(10px + var(--safe-bottom));
-    z-index: 8;
     background: linear-gradient(180deg, rgba(16, 24, 42, 0.96), rgba(12, 18, 33, 0.96));
     backdrop-filter: blur(22px) saturate(130%);
   }
@@ -833,7 +946,13 @@ p {
   .banner-title {
     font-size: 20px;
   }
+
+  .event-toast {
+    min-width: min(90vw, 320px);
+    max-width: min(92vw, 360px);
+  }
 }
+
 
 @media (max-width: 420px) {
   .app-shell {
@@ -1026,4 +1145,32 @@ p {
   margin-left: 10px;
   vertical-align: middle;
   font-size: 11px;
+}
+
+
+@media (max-width: 420px) {
+  .card-head,
+  .history-top,
+  .score-top,
+  .latest-guess-head {
+    align-items: flex-start;
+  }
+
+  .player-name,
+  .section-title {
+    font-size: 16px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+  }
+
+  .history-guess,
+  .score-value {
+    font-size: 26px;
+  }
+
+  .event-toast-title {
+    font-size: 18px;
+  }
 }
