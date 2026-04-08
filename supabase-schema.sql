@@ -15,6 +15,14 @@ create table if not exists public.game_rooms (
   check (current_turn_slot is null or current_turn_slot in (1, 2))
 );
 
+alter table public.game_rooms add column if not exists match_mode integer not null default 3;
+alter table public.game_rooms add column if not exists score_slot1 integer not null default 0;
+alter table public.game_rooms add column if not exists score_slot2 integer not null default 0;
+alter table public.game_rooms add column if not exists round_no integer not null default 1;
+alter table public.game_rooms add column if not exists match_winner_slot integer;
+alter table public.game_rooms add column if not exists rematch_host_ready boolean not null default false;
+alter table public.game_rooms add column if not exists rematch_guest_ready boolean not null default false;
+
 create table if not exists public.room_players (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.game_rooms(id) on delete cascade,
@@ -51,10 +59,24 @@ create table if not exists public.game_guesses (
   unique (room_id, turn_no)
 );
 
+create table if not exists public.match_round_history (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.game_rooms(id) on delete cascade,
+  round_no integer not null,
+  winner_slot integer not null check (winner_slot in (1, 2)),
+  winner_nickname text not null,
+  total_guesses integer not null default 0,
+  slot1_guess_count integer not null default 0,
+  slot2_guess_count integer not null default 0,
+  finished_at timestamptz not null default now(),
+  unique (room_id, round_no)
+);
+
 create index if not exists idx_room_players_room_id on public.room_players(room_id);
 create index if not exists idx_private_player_states_room_id on public.private_player_states(room_id);
 create index if not exists idx_private_player_states_session_id on public.private_player_states(session_id);
 create index if not exists idx_game_guesses_room_id on public.game_guesses(room_id);
+create index if not exists idx_match_round_history_room_id on public.match_round_history(room_id);
 
 create or replace function public.touch_updated_at()
 returns trigger
@@ -159,7 +181,13 @@ begin
   update public.game_rooms
   set status = 'lobby',
       current_turn_slot = null,
-      winner_slot = null
+      winner_slot = null,
+      score_slot1 = 0,
+      score_slot2 = 0,
+      round_no = 1,
+      match_winner_slot = null,
+      rematch_host_ready = false,
+      rematch_guest_ready = false
   where id = v_room_id;
 
   update public.room_players
@@ -175,15 +203,20 @@ begin
   delete from public.game_guesses
   where room_id = v_room_id;
 
+  delete from public.match_round_history
+  where room_id = v_room_id;
+
   return jsonb_build_object('left', true, 'room_deleted', false);
 end;
 $$;
 
+drop function if exists public.create_room(text, text, integer, integer);
 create or replace function public.create_room(
   _session_id text,
   _nickname text,
   _min_value integer,
-  _max_value integer
+  _max_value integer,
+  _match_mode integer default 3
 )
 returns jsonb
 language plpgsql
@@ -195,8 +228,10 @@ declare
   v_player_id uuid;
   v_code text;
   v_nickname text;
+  v_match_mode integer;
 begin
   v_nickname := left(trim(coalesce(_nickname, '')), 18);
+  v_match_mode := case when _match_mode in (3, 5) then _match_mode else 3 end;
 
   if v_nickname = '' then
     raise exception 'nickname required';
@@ -214,8 +249,36 @@ begin
 
   v_code := public.generate_room_code();
 
-  insert into public.game_rooms (code, min_value, max_value, status, current_turn_slot, winner_slot)
-  values (v_code, _min_value, _max_value, 'lobby', null, null)
+  insert into public.game_rooms (
+    code,
+    min_value,
+    max_value,
+    status,
+    current_turn_slot,
+    winner_slot,
+    match_mode,
+    score_slot1,
+    score_slot2,
+    round_no,
+    match_winner_slot,
+    rematch_host_ready,
+    rematch_guest_ready
+  )
+  values (
+    v_code,
+    _min_value,
+    _max_value,
+    'lobby',
+    null,
+    null,
+    v_match_mode,
+    0,
+    0,
+    1,
+    null,
+    false,
+    false
+  )
   returning id into v_room_id;
 
   insert into public.room_players (room_id, nickname, slot, is_host, has_submitted_secret)
@@ -334,12 +397,7 @@ begin
     raise exception 'invalid range';
   end if;
 
-  select *
-  into v_room
-  from public.game_rooms
-  where code = upper(trim(_code))
-  limit 1;
-
+  select * into v_room from public.game_rooms where code = upper(trim(_code)) limit 1;
   if not found then
     raise exception 'room not found';
   end if;
@@ -373,6 +431,87 @@ begin
 end;
 $$;
 
+create or replace function public.update_room_settings(
+  _code text,
+  _session_id text,
+  _min_value integer,
+  _max_value integer,
+  _match_mode integer
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.game_rooms%rowtype;
+  v_is_host boolean;
+  v_match_mode integer;
+begin
+  if _min_value is null or _max_value is null or _min_value >= _max_value then
+    raise exception 'invalid range';
+  end if;
+
+  if _match_mode not in (3, 5) then
+    raise exception 'invalid match mode';
+  end if;
+
+  v_match_mode := _match_mode;
+
+  select * into v_room from public.game_rooms where code = upper(trim(_code)) limit 1;
+  if not found then
+    raise exception 'room not found';
+  end if;
+
+  select rp.is_host
+  into v_is_host
+  from public.room_players rp
+  join public.private_player_states ps on ps.player_id = rp.id
+  where rp.room_id = v_room.id
+    and ps.session_id = trim(_session_id)
+  limit 1;
+
+  if not found then
+    raise exception 'not in room';
+  end if;
+
+  if not v_is_host then
+    raise exception 'host only';
+  end if;
+
+  if v_room.status <> 'lobby' then
+    raise exception 'lobby only';
+  end if;
+
+  update public.game_rooms
+  set min_value = _min_value,
+      max_value = _max_value,
+      match_mode = v_match_mode,
+      score_slot1 = 0,
+      score_slot2 = 0,
+      round_no = 1,
+      match_winner_slot = null,
+      rematch_host_ready = false,
+      rematch_guest_ready = false
+  where id = v_room.id;
+
+  delete from public.match_round_history where room_id = v_room.id;
+  delete from public.game_guesses where room_id = v_room.id;
+
+  update public.room_players
+  set has_submitted_secret = false
+  where room_id = v_room.id;
+
+  update public.private_player_states
+  set secret_number = null,
+      range_low = null,
+      range_high = null
+  where room_id = v_room.id;
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
 create or replace function public.start_round(
   _code text,
   _session_id text
@@ -386,6 +525,7 @@ declare
   v_room public.game_rooms%rowtype;
   v_is_host boolean;
   v_count integer;
+  v_next_round integer;
 begin
   select *
   into v_room
@@ -417,6 +557,10 @@ begin
     raise exception 'already in progress';
   end if;
 
+  if v_room.match_winner_slot is not null then
+    raise exception 'match finished';
+  end if;
+
   select count(*)
   into v_count
   from public.room_players rp
@@ -439,10 +583,15 @@ begin
       range_high = null
   where room_id = v_room.id;
 
+  v_next_round := case when v_room.status = 'finished' then v_room.round_no + 1 else v_room.round_no end;
+
   update public.game_rooms
   set status = 'choosing',
       current_turn_slot = 1,
-      winner_slot = null
+      winner_slot = null,
+      round_no = v_next_round,
+      rematch_host_ready = false,
+      rematch_guest_ready = false
   where id = v_room.id;
 
   return jsonb_build_object('ok', true);
@@ -546,6 +695,13 @@ declare
   v_new_high integer;
   v_result text;
   v_turn_no integer;
+  v_slot1_count integer;
+  v_slot2_count integer;
+  v_total_guesses integer;
+  v_new_score1 integer;
+  v_new_score2 integer;
+  v_target integer;
+  v_match_winner integer;
 begin
   select *
   into v_room
@@ -668,10 +824,58 @@ begin
   );
 
   if v_result = 'correct' then
+    select count(*) filter (where guesser_slot = 1),
+           count(*) filter (where guesser_slot = 2),
+           count(*)
+    into v_slot1_count, v_slot2_count, v_total_guesses
+    from public.game_guesses
+    where room_id = v_room.id;
+
+    insert into public.match_round_history (
+      room_id,
+      round_no,
+      winner_slot,
+      winner_nickname,
+      total_guesses,
+      slot1_guess_count,
+      slot2_guess_count
+    )
+    values (
+      v_room.id,
+      v_room.round_no,
+      v_player.slot,
+      v_player.nickname,
+      v_total_guesses,
+      v_slot1_count,
+      v_slot2_count
+    )
+    on conflict (room_id, round_no)
+    do update set
+      winner_slot = excluded.winner_slot,
+      winner_nickname = excluded.winner_nickname,
+      total_guesses = excluded.total_guesses,
+      slot1_guess_count = excluded.slot1_guess_count,
+      slot2_guess_count = excluded.slot2_guess_count,
+      finished_at = now();
+
+    v_new_score1 := v_room.score_slot1 + case when v_player.slot = 1 then 1 else 0 end;
+    v_new_score2 := v_room.score_slot2 + case when v_player.slot = 2 then 1 else 0 end;
+    v_target := ceil(v_room.match_mode / 2.0);
+    v_match_winner := case
+      when v_new_score1 >= v_target then 1
+      when v_new_score2 >= v_target then 2
+      else null
+    end;
+
     update public.game_rooms
     set status = 'finished',
         winner_slot = v_player.slot,
-        current_turn_slot = v_player.slot
+        match_winner_slot = v_match_winner,
+        score_slot1 = v_new_score1,
+        score_slot2 = v_new_score2,
+        current_turn_slot = v_player.slot,
+        rematch_host_ready = false,
+        rematch_guest_ready = false
     where id = v_room.id;
   else
     update public.game_rooms
@@ -684,6 +888,89 @@ begin
     'visible_low', v_new_low,
     'visible_high', v_new_high
   );
+end;
+$$;
+
+create or replace function public.request_rematch(
+  _code text,
+  _session_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_room public.game_rooms%rowtype;
+  v_player public.room_players%rowtype;
+  v_started boolean := false;
+begin
+  select * into v_room
+  from public.game_rooms
+  where code = upper(trim(_code))
+  limit 1;
+
+  if not found then
+    raise exception 'room not found';
+  end if;
+
+  if v_room.status <> 'finished' then
+    raise exception 'lobby only';
+  end if;
+
+  select rp.* into v_player
+  from public.room_players rp
+  join public.private_player_states ps on ps.player_id = rp.id
+  where rp.room_id = v_room.id
+    and ps.session_id = trim(_session_id)
+  limit 1;
+
+  if not found then
+    raise exception 'not in room';
+  end if;
+
+  if v_player.is_host then
+    update public.game_rooms
+    set rematch_host_ready = true
+    where id = v_room.id;
+  else
+    update public.game_rooms
+    set rematch_guest_ready = true
+    where id = v_room.id;
+  end if;
+
+  select * into v_room from public.game_rooms where id = v_room.id;
+
+  if v_room.rematch_host_ready and v_room.rematch_guest_ready then
+    delete from public.game_guesses where room_id = v_room.id;
+    delete from public.match_round_history where room_id = v_room.id;
+
+    update public.room_players
+    set has_submitted_secret = false
+    where room_id = v_room.id;
+
+    update public.private_player_states
+    set secret_number = null,
+        range_low = null,
+        range_high = null
+    where room_id = v_room.id;
+
+    update public.game_rooms
+    set status = 'choosing',
+        current_turn_slot = 1,
+        winner_slot = null,
+        score_slot1 = 0,
+        score_slot2 = 0,
+        round_no = 1,
+        match_winner_slot = null,
+        rematch_host_ready = false,
+        rematch_guest_ready = false
+    where id = v_room.id;
+
+    v_started := true;
+  end if;
+
+  return jsonb_build_object('ok', true, 'started', v_started);
 end;
 $$;
 
@@ -702,6 +989,7 @@ declare
   v_players jsonb;
   v_guesses jsonb;
   v_opponent jsonb;
+  v_round_history jsonb;
 begin
   select *
   into v_room
@@ -773,6 +1061,26 @@ begin
   from public.game_guesses gg
   where gg.room_id = v_room.id;
 
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', rh.id,
+        'round_no', rh.round_no,
+        'winner_slot', rh.winner_slot,
+        'winner_nickname', rh.winner_nickname,
+        'total_guesses', rh.total_guesses,
+        'slot1_guess_count', rh.slot1_guess_count,
+        'slot2_guess_count', rh.slot2_guess_count,
+        'finished_at', rh.finished_at
+      )
+      order by rh.round_no desc
+    ),
+    '[]'::jsonb
+  )
+  into v_round_history
+  from public.match_round_history rh
+  where rh.room_id = v_room.id;
+
   select jsonb_build_object(
     'id', rp.id,
     'nickname', rp.nickname,
@@ -798,7 +1106,14 @@ begin
       'current_turn_slot', v_room.current_turn_slot,
       'winner_slot', v_room.winner_slot,
       'created_at', v_room.created_at,
-      'updated_at', v_room.updated_at
+      'updated_at', v_room.updated_at,
+      'match_mode', v_room.match_mode,
+      'score_slot1', v_room.score_slot1,
+      'score_slot2', v_room.score_slot2,
+      'round_no', v_room.round_no,
+      'match_winner_slot', v_room.match_winner_slot,
+      'rematch_host_ready', v_room.rematch_host_ready,
+      'rematch_guest_ready', v_room.rematch_guest_ready
     ),
     'you', jsonb_build_object(
       'id', v_you.id,
@@ -812,7 +1127,8 @@ begin
     ),
     'opponent', coalesce(v_opponent, '{}'::jsonb),
     'players', v_players,
-    'guesses', v_guesses
+    'guesses', v_guesses,
+    'round_history', v_round_history
   );
 end;
 $$;
@@ -821,12 +1137,16 @@ alter table public.game_rooms enable row level security;
 alter table public.room_players enable row level security;
 alter table public.private_player_states enable row level security;
 alter table public.game_guesses enable row level security;
+alter table public.match_round_history enable row level security;
 
 grant execute on function public.generate_room_code() to anon, authenticated, service_role;
-grant execute on function public.create_room(text, text, integer, integer) to anon, authenticated, service_role;
+grant execute on function public.leave_current_room(text) to anon, authenticated, service_role;
+grant execute on function public.create_room(text, text, integer, integer, integer) to anon, authenticated, service_role;
 grant execute on function public.join_room(text, text, text) to anon, authenticated, service_role;
 grant execute on function public.update_room_range(text, text, integer, integer) to anon, authenticated, service_role;
+grant execute on function public.update_room_settings(text, text, integer, integer, integer) to anon, authenticated, service_role;
 grant execute on function public.start_round(text, text) to anon, authenticated, service_role;
 grant execute on function public.submit_secret_number(text, text, integer) to anon, authenticated, service_role;
 grant execute on function public.make_guess(text, text, integer) to anon, authenticated, service_role;
+grant execute on function public.request_rematch(text, text) to anon, authenticated, service_role;
 grant execute on function public.get_room_state(text, text) to anon, authenticated, service_role;
