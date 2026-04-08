@@ -1,5 +1,5 @@
-const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = 'https://tlaeajmgycycihqdeqpo.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_yT1s8xGeAFrbMcYI772MgA_tLWUOK9M';
 
 const CONFIG_READY =
   SUPABASE_URL.startsWith('https://') &&
